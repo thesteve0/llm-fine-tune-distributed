@@ -1,0 +1,134 @@
+apiVersion: "kubeflow.org/v1"
+kind: PyTorchJob
+metadata:
+  name: smollm3-distributed-finetuning
+  namespace: lyric-professor
+  annotations:
+    # OpenShift AI metrics collection annotations
+    opendatahub.io/connection: "true"
+    ml-platform/workbench: "wilderness-distributed-training"
+spec:
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1 # Master node for distributed training coordination
+      restartPolicy: OnFailure
+      template:
+        metadata:
+          annotations:
+            # Additional annotations for OpenShift AI monitoring
+            ml-platform/component: "pytorch-distributed-training"
+            ml-platform/model: "smollm3-3b-wilderness-distributed"
+        spec:
+          tolerations:
+            - effect: NoSchedule
+              key: nvidia.com/gpu
+              operator: Exists
+          containers:
+            - name: pytorch
+              image: your-registry/smollm3-distributed-finetune:v1
+              env:
+                - name: EPOCHS
+                  value: "4"
+                - name: BATCH_SIZE
+                  value: "8"  # Reduced per-device batch size for distributed training
+                - name: LEARNING_RATE
+                  value: "5e-5"
+                - name: DATA_DIR
+                  value: "/shared/data"
+                - name: OUTPUT_DIR
+                  value: "/shared/models"
+                # Distributed training environment variables
+                - name: WORLD_SIZE
+                  value: "4"  # Total number of processes (1 master + 3 workers)
+                - name: MASTER_ADDR
+                  value: "smollm3-distributed-finetuning-master-0"
+                - name: MASTER_PORT
+                  value: "23456"
+                - name: RANK
+                  value: "0"  # Master rank
+                - name: NCCL_DEBUG
+                  value: "INFO"
+              resources:
+                requests:
+                  memory: "16Gi"
+                  cpu: "4"
+                  nvidia.com/gpu: 1
+                limits:
+                  memory: "20Gi"
+                  cpu: "6"
+                  # NVIDIA L40S with 48GB VRAM for distributed training
+                  nvidia.com/gpu: 1
+              volumeMounts:
+                - name: trained-models
+                  mountPath: /shared/models
+                - name: workspace
+                  mountPath: /shared/workspace
+              ports:
+                - containerPort: 23456
+                  name: master-port
+          volumes:
+            - name: trained-models
+              persistentVolumeClaim:
+                claimName: trained-models-pvc
+            - name: workspace
+              persistentVolumeClaim:
+                claimName: workspace-pvc
+    Worker:
+      replicas: 3  # 3 worker nodes for distributed training
+      restartPolicy: OnFailure
+      template:
+        metadata:
+          annotations:
+            ml-platform/component: "pytorch-distributed-worker"
+            ml-platform/model: "smollm3-3b-wilderness-distributed"
+        spec:
+          tolerations:
+            - effect: NoSchedule
+              key: nvidia.com/gpu
+              operator: Exists
+          containers:
+            - name: pytorch
+              image: your-registry/smollm3-distributed-finetune:v1
+              env:
+                - name: EPOCHS
+                  value: "4"
+                - name: BATCH_SIZE
+                  value: "8"  # Reduced per-device batch size for distributed training
+                - name: LEARNING_RATE
+                  value: "5e-5"
+                - name: DATA_DIR
+                  value: "/shared/data"
+                - name: OUTPUT_DIR
+                  value: "/shared/models"
+                # Distributed training environment variables
+                - name: WORLD_SIZE
+                  value: "4"  # Total number of processes (1 master + 3 workers)
+                - name: MASTER_ADDR
+                  value: "smollm3-distributed-finetuning-master-0"
+                - name: MASTER_PORT
+                  value: "23456"
+                # RANK will be set automatically by PyTorchJob for workers
+                - name: NCCL_DEBUG
+                  value: "INFO"
+              resources:
+                requests:
+                  memory: "16Gi"
+                  cpu: "4"
+                  nvidia.com/gpu: 1
+                limits:
+                  memory: "20Gi"
+                  cpu: "6"
+                  # NVIDIA L40S with 48GB VRAM for distributed training
+                  nvidia.com/gpu: 1
+              volumeMounts:
+                - name: trained-models
+                  mountPath: /shared/models
+                - name: workspace
+                  mountPath: /shared/workspace
+          volumes:
+            - name: trained-models
+              persistentVolumeClaim:
+                claimName: trained-models-pvc
+            - name: workspace
+              persistentVolumeClaim:
+                claimName: workspace-pvc

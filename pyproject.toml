@@ -1,0 +1,7 @@
+[project]
+name = "llm-fine-tune-distributed"
+version = "0.1.0"
+description = "Wilderness Survival & Practical Skills Q&A Fine-tuning with Distributed Training on OpenShift AI and Kubeflow"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []

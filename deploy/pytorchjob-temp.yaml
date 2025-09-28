@@ -1,0 +1,62 @@
+apiVersion: "kubeflow.org/v1"
+kind: PyTorchJob
+metadata:
+  name: pythia-finetuning-demo
+  namespace: lyric-professor
+  annotations:
+    # OpenShift AI metrics collection annotations
+    opendatahub.io/connection: "true"
+    ml-platform/workbench: "lyrics-training"
+    project-version: "0.1.20250927-181232"
+spec:
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1 # Single-node training for wilderness survival fine-tuning
+      restartPolicy: OnFailure
+      template:
+        metadata:
+          annotations:
+            # Additional annotations for OpenShift AI monitoring
+            ml-platform/component: "pytorch-training"
+            ml-platform/model: "smollm3-3b-wilderness"
+        spec:
+          tolerations:
+            - effect: NoSchedule
+              key: nvidia.com/gpu
+              operator: Exists
+          containers:
+            - name: pytorch
+              image: ghcr.io/thesteve0/smollm3-wilderness-finetune:0.1.20250927-181232
+              env:
+                - name: EPOCHS
+                  value: "4"
+                - name: BATCH_SIZE
+                  value: "12"
+                - name: LEARNING_RATE
+                  value: "5e-5"
+                - name: DATA_DIR
+                  value: "/shared/data"
+                - name: OUTPUT_DIR
+                  value: "/shared/models"
+              resources:
+                requests:
+                  memory: "16Gi"
+                  cpu: "4"
+                  nvidia.com/gpu: 1
+                limits:
+                  memory: "20Gi"
+                  cpu: "6"
+                  # NVIDIA L40S with 48GB VRAM targeting 45GB utilization (94%)
+                  nvidia.com/gpu: 1
+              volumeMounts:
+                - name: trained-models
+                  mountPath: /shared/models
+                - name: workspace
+                  mountPath: /shared/workspace
+          volumes:
+            - name: trained-models
+              persistentVolumeClaim:
+                claimName: trained-models-pvc
+            - name: workspace
+              persistentVolumeClaim:
+                claimName: workspace-pvc

@@ -1,0 +1,57 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: swaparoony-face-swap
+  namespace: kcd-face-swapper
+  annotations:
+    serving.kserve.io/deploymentMode: "RawDeployment"
+    serving.kserve.io/disable-initializer: "true"
+    serving.kserve.io/stop: 'false'
+  labels:
+    opendatahub.io/dashboard: 'true'
+spec:
+  predictor:
+    tolerations:
+    - effect: NoSchedule
+      key: nvidia.com/gpu
+      operator: Exists
+    volumes:
+    - name: home
+      emptyDir: {}
+    containers:
+    - name: kserve-container
+      image: ghcr.io/thesteve0/kcd-swaparoony-kserve:0.2.10
+      env:
+      - name: HOME
+        value: /home/user
+      - name: MPLCONFIGDIR
+        value: /tmp/matplotlib
+      - name: INSIGHTFACE_HOME
+        value: /tmp/insightface
+      ports:
+      - containerPort: 8080
+        protocol: TCP
+      resources:
+        requests:
+          cpu: 500m
+          memory: 2Gi
+          nvidia.com/gpu: 1
+        limits:
+          cpu: 1000m
+          memory: 5Gi
+          nvidia.com/gpu: 1
+      readinessProbe:
+        httpGet:
+          path: /v1/models/swaparoony-face-swap
+          port: 8080
+        initialDelaySeconds: 60
+        periodSeconds: 10
+      livenessProbe:
+        httpGet:
+          path: /v1/models/swaparoony-face-swap
+          port: 8080
+        initialDelaySeconds: 60
+        periodSeconds: 30
+      volumeMounts:
+      - name: home
+        mountPath: /home/user

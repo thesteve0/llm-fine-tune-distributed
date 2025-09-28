@@ -1,0 +1,10 @@
+### Updated for SmolLM3 support - requires newer transformers
+### Container provides: transformers==4.51.3, accelerate==1.6.0
+
+accelerate==1.6.0
+# bitsandbytes
+# datasets
+# torch
+transformers>=4.46.0  # SmolLM3 support requires newer version
+trl>=0.8.0  # TRL (Transformers Reinforcement Learning) for SFTTrainer
+flash-attn>=2.0.0  # For FlashAttention optimization (install: pip install flash-attn --no-build-isolation)

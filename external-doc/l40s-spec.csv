@@ -1,0 +1,27 @@
+"GPU Architecture","NVIDIA Ada Lovelace architecture"
+"GPU Memory","48GB GDDR6 with ECC"
+"Memory Bandwidth","864GB/s"
+"Interconnect Interface","PCIe Gen4 x16: 64GB/s bidirectional"
+"NVIDIA Ada Lovelace Architecture-Based CUDA® Cores","18,176"
+"NVIDIA Third-Generation RT Cores",142
+"NVIDIA Fourth-Generation Tensor Cores",568
+"RT Core Performance TFLOPS",212
+"FP32 TFLOPS",91.6
+"TF32 Tensor Core TFLOPS","183 I 366*"
+"BFLOAT16 Tensor Core TFLOPS","362.05 I 733*"
+"FP16 Tensor Core","362.05 I 733*"
+"FP8 Tensor Core","733 I 1,466*"
+"Peak INT8 Tensor TOPS Peak INT4 Tensor TOPS","733 I 1,466* 733 I 1,466*"
+"Form Factor","4.4"" (H) x 10.5"" (L), dual slot"
+"Display Ports","4x DisplayPort 1.4a"
+"Max Power Consumption",350W
+"Power Connector","16-pin"
+Thermal,Passive
+"Virtual GPU (vGPU) Software Support",Yes
+"vGPU Profiles Supported","See virtual GPU licensing guide"
+"NVENC I NVDEC","3x l 3x (includes AV1 encode and decode)"
+"Secure Boot With Root of Trust",Yes
+"NEBS Ready","Level 3"
+"Multi-Instance GPU (MIG) Support",No
+"NVIDIA® NVLink® Support",No
+"*With Sparsity",""

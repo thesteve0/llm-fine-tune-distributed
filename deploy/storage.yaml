@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: trained-models-pvc
+  namespace: lyric-professor
+  annotations:
+    # Storage for SmolLM3-3B model outputs and checkpoints
+    ml-platform/data-type: "model-artifacts"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 110Gi # For SmolLM3-3B model checkpoints, best_model/, training_history.json, etc.
+  storageClassName: gp3-csi # Adjust based on your cluster's storage class
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workspace-pvc
+  namespace: lyric-professor
+  annotations:
+    # Working directory and temporary files during training
+    ml-platform/data-type: "workspace"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 110Gi # For temporary files and working directory
+  storageClassName: gp3-csi # Adjust based on your cluster's storage class
