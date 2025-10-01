@@ -196,7 +196,7 @@ kubectl get pods -l pytorch-job-name=smollm3-distributed-finetuning
 # Check PyTorchJob status
 kubectl describe pytorchjob smollm3-distributed-finetuning
 
-# View logs from specific worker
+# View logs from worker
 kubectl logs smollm3-distributed-finetuning-worker-0
 
 # Check GPU allocation

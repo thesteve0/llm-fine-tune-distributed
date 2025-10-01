@@ -20,7 +20,7 @@ echo "New version: ${NEW_VERSION}"
 
 # Update .version file
 echo "${NEW_VERSION}" > ../.version
-echo "✅ Updated .version file"
+echo "Updated .version file"
 
 # Full image name with new version
 FULL_IMAGE_NAME="${REGISTRY_URL}/${IMAGE_NAME}:${NEW_VERSION}"
@@ -57,7 +57,7 @@ echo "PyTorchJob updated with version ${NEW_VERSION}"
 # Check for existing PyTorchJob and clean up if necessary
 echo "Checking for existing PyTorchJob deployments..."
 if kubectl get pytorchjob smollm3-distributed-finetuning >/dev/null 2>&1; then
-    echo "⚠Found existing PyTorchJob 'smollm3-distributed-finetuning', deleting..."
+    echo "Found existing PyTorchJob 'smollm3-distributed-finetuning', deleting..."
     kubectl delete pytorchjob smollm3-distributed-finetuning
 
     # Wait for pods to be cleaned up
@@ -76,12 +76,33 @@ else
     echo "No existing PyTorchJob found"
 fi
 
-# Create storage PVCs first (required before PyTorchJob)
-echo "Creating storage PVCs for distributed training data, models, and workspace..."
+# Create PVC for master pod to persist trained models
+echo "Creating PVC for master model storage..."
 kubectl apply -f storage.yaml
 
-echo "PVCs created - will bind when training pods start"
-kubectl get pvc
+# Create service for master pod
+echo "Creating service for master pod..."
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: smollm3-distributed-finetuning-master-0
+  namespace: lyric-professor
+  labels:
+    app: smollm3-distributed-finetuning
+    role: master
+spec:
+  selector:
+    training.kubeflow.org/job-name: smollm3-distributed-finetuning
+    training.kubeflow.org/replica-type: master
+    training.kubeflow.org/replica-index: "0"
+  ports:
+  - name: master-port
+    port: 23456
+    targetPort: 23456
+    protocol: TCP
+  type: ClusterIP
+EOF
 
 # Apply the PyTorchJob to start distributed training
 echo "Starting distributed PyTorchJob for wilderness survival fine-tuning with version ${NEW_VERSION}..."
@@ -100,21 +121,20 @@ kubectl get pods -l pytorch-job-name=smollm3-distributed-finetuning
 
 # Display resource usage information for distributed training
 echo ""
-echo "🔧 Resource allocation for distributed training:"
-echo "- Master Node: 1x NVIDIA L40S (48GB VRAM), 20GB RAM, 6 vCPU"
-echo "- Worker Nodes: 3x NVIDIA L40S (48GB VRAM each), 20GB RAM, 6 vCPU each"
-echo "- Total GPUs: 4 (1 Master + 3 Workers)"
-echo "- Total VRAM: 192GB (48GB × 4 GPUs)"
-echo "- Effective batch size: 8 × 4 = 32 (per device × world size)"
+echo "Resource allocation for distributed training:"
+echo "- Master Node: 1x NVIDIA L40S (48GB VRAM), 20GB RAM, 6 vCPU (saves final model)"
+echo "- Worker Node: 1x NVIDIA L40S (48GB VRAM), 20GB RAM, 6 vCPU (training only)"
+echo "- Total GPUs: 2 (1 Master + 1 Worker)"
+echo "- Total VRAM: 96GB (48GB × 2 GPUs)"
+echo "- Storage: Local pod storage only, no shared PVCs"
+echo "- Effective batch size: 8 × 2 = 16 (per device × world size)"
 
 echo ""
-echo "📈 To monitor distributed training progress:"
+echo "To monitor distributed training progress:"
 echo "Master node: kubectl logs -f smollm3-distributed-finetuning-master-0"
-echo "Worker 1:    kubectl logs -f smollm3-distributed-finetuning-worker-0"
-echo "Worker 2:    kubectl logs -f smollm3-distributed-finetuning-worker-1"
-echo "Worker 3:    kubectl logs -f smollm3-distributed-finetuning-worker-2"
+echo "Worker node: kubectl logs -f smollm3-distributed-finetuning-worker-0"
 echo ""
-echo "📊 To check OpenShift AI metrics:"
+echo "To check OpenShift AI metrics:"
 echo "Navigate to: OpenShift AI → Distributed workloads → Project metrics"
 
 echo ""

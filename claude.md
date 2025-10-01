@@ -125,7 +125,7 @@ The distributed training script accepts configuration through environment variab
 **Batch Size Scaling:**
 - **Per-Device Batch Size**: 8 (reduced from single-node 12 for stability)
 - **Gradient Accumulation**: 2 steps (reduced from single-node 5)
-- **Effective Batch Size**: 8 × 4 GPUs × 2 accumulation = 64
+- **Effective Batch Size**: 8 × 2 GPUs × 2 accumulation = 32
 - **Training Efficiency**: Optimized for memory usage and convergence
 
 **Learning Rate Scaling:**

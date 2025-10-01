@@ -13,7 +13,7 @@ from transformers import (
 from trl import SFTTrainer, SFTConfig
 
 def setup_distributed():
-    """Initialize distributed training environment"""
+    """Setup distributed training environment for Accelerate integration"""
     # Get distributed training parameters from environment
     world_size = int(os.getenv("WORLD_SIZE", "1"))
     rank = int(os.getenv("RANK", "0"))
@@ -21,24 +21,20 @@ def setup_distributed():
     master_addr = os.getenv("MASTER_ADDR", "localhost")
     master_port = os.getenv("MASTER_PORT", "23456")
 
-    # Initialize distributed training
+    # Set distributed environment variables for Accelerate/Transformers
     if world_size > 1:
-        # Set up distributed training
+        print(f"Setting up distributed training environment for Accelerate...")
+        print(f"Rank {rank}/{world_size}, local_rank {local_rank}")
+        print(f"Master: {master_addr}:{master_port}")
+
+        # Ensure environment variables are properly set for Accelerate
         os.environ["MASTER_ADDR"] = master_addr
         os.environ["MASTER_PORT"] = master_port
+        os.environ["WORLD_SIZE"] = str(world_size)
+        os.environ["RANK"] = str(rank)
+        os.environ["LOCAL_RANK"] = str(local_rank)
 
-        # Initialize the process group
-        dist.init_process_group(
-            backend="nccl",  # Use NCCL for GPU communication
-            world_size=world_size,
-            rank=rank
-        )
-
-        # Set the GPU device for this process
-        torch.cuda.set_device(local_rank)
-
-        print(f"Distributed training initialized: rank {rank}/{world_size}, local_rank {local_rank}")
-        print(f"Master: {master_addr}:{master_port}")
+        print("Distributed environment configured - letting Accelerate handle initialization")
     else:
         print("Single-node training mode")
 
@@ -46,8 +42,8 @@ def setup_distributed():
 
 def cleanup_distributed():
     """Clean up distributed training"""
-    if dist.is_initialized():
-        dist.destroy_process_group()
+    # Accelerate handles cleanup automatically
+    print("Distributed training cleanup - handled by Accelerate")
 
 def main():
     # Initialize distributed training
@@ -59,12 +55,13 @@ def main():
     epochs = int(os.getenv("EPOCHS", "4"))
     batch_size = int(os.getenv("BATCH_SIZE", "8"))  # Reduced for distributed training
     learning_rate = float(os.getenv("LEARNING_RATE", "5e-5"))
-    data_dir = os.getenv("DATA_DIR", "/shared/data")
-    output_dir = os.getenv("OUTPUT_DIR", "/shared/models")
+    data_dir = os.getenv("DATA_DIR", "/tmp/data")
+    output_dir = os.getenv("OUTPUT_DIR", "/tmp/models")
 
-    # Create output directories
-    os.makedirs(f"{output_dir}/best_model", exist_ok=True)
-    os.makedirs(f"{output_dir}/demo_outputs", exist_ok=True)
+    # Create output directories (only on master node)
+    if rank == 0:
+        os.makedirs(f"{output_dir}/best_model", exist_ok=True)
+        os.makedirs(f"{output_dir}/demo_outputs", exist_ok=True)
 
     print(f"Configuration:")
     print(f"- Model: {model_name}")
@@ -75,9 +72,40 @@ def main():
     print(f"- Data dir: {data_dir}")
     print(f"- Output dir: {output_dir}")
 
-    # Check CUDA availability
+    # Environment diagnostics for NCCL troubleshooting
+    print("\n=== Environment Diagnostics ===")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA device count: {torch.cuda.device_count()}")
+        print(f"Current CUDA device: {torch.cuda.current_device()}")
+        print(f"CUDA device name: {torch.cuda.get_device_name()}")
+        print(f"CUDA capability: {torch.cuda.get_device_capability()}")
+
+    # Check NCCL availability
+    try:
+        nccl_available = torch.distributed.is_nccl_available()
+        print(f"NCCL available: {nccl_available}")
+    except Exception as e:
+        print(f"NCCL check failed: {e}")
+
+    # Network interface information
+    import socket
+    hostname = socket.gethostname()
+    print(f"Hostname: {hostname}")
+    print(f"Container networking interface: eth0")
+
+    # Environment variables
+    print(f"NCCL_DEBUG: {os.getenv('NCCL_DEBUG', 'not set')}")
+    print(f"NCCL_SOCKET_IFNAME: {os.getenv('NCCL_SOCKET_IFNAME', 'not set')}")
+    print(f"NCCL_IB_DISABLE: {os.getenv('NCCL_IB_DISABLE', 'not set')}")
+    print(f"NCCL_P2P_DISABLE: {os.getenv('NCCL_P2P_DISABLE', 'not set')}")
+    print(f"PYTORCH_CUDA_ALLOC_CONF: {os.getenv('PYTORCH_CUDA_ALLOC_CONF', 'not set')}")
+    print("=== End Diagnostics ===\n")
+
     if not torch.cuda.is_available():
-        print("WARNING: CUDA not available, falling back to CPU training")
+        print("ERROR: CUDA not available - distributed training requires GPUs")
+        raise RuntimeError("CUDA not available")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -240,17 +268,17 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
         distributed_args = {}
         if world_size > 1:
             distributed_args.update({
-                "ddp_backend": "nccl",
                 "ddp_find_unused_parameters": False,
-                "ddp_bucket_cap_mb": 25,
+                "ddp_bucket_cap_mb": 50,  # Larger buckets for fewer network syncs
                 "local_rank": local_rank,
             })
+            print("Using NCCL backend for DDP training")
 
         training_args = SFTConfig(
             output_dir=f"{output_dir}/checkpoints",
             per_device_train_batch_size=batch_size,
             per_device_eval_batch_size=batch_size,
-            gradient_accumulation_steps=5 if world_size == 1 else 2,  # Reduce for distributed
+            gradient_accumulation_steps=4 if world_size == 1 else 16,  # Aggressive network optimization: Maximum sync reduction
             learning_rate=learning_rate * world_size if world_size > 1 else learning_rate,  # Scale learning rate
             max_grad_norm=1.0,
             num_train_epochs=epochs,
@@ -272,6 +300,8 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
             dataloader_drop_last=True,
             max_seq_length=1024,
             packing=False,
+            # Explicitly configure distributed training for Accelerate
+            ddp_backend="nccl" if world_size > 1 else None,
             **distributed_args
         )
 

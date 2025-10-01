@@ -1,24 +1,24 @@
 apiVersion: "kubeflow.org/v1"
 kind: PyTorchJob
 metadata:
-  name: pythia-finetuning-demo
+  name: smollm3-distributed-finetuning
   namespace: lyric-professor
   annotations:
     # OpenShift AI metrics collection annotations
     opendatahub.io/connection: "true"
-    ml-platform/workbench: "lyrics-training"
-    project-version: "0.1.20250927-181232"
+    ml-platform/workbench: "wilderness-distributed-training"
+    project-version: "0.1.20250928-225553"
 spec:
   pytorchReplicaSpecs:
     Master:
-      replicas: 1 # Single-node training for wilderness survival fine-tuning
+      replicas: 1 # Master node for distributed training coordination
       restartPolicy: OnFailure
       template:
         metadata:
           annotations:
             # Additional annotations for OpenShift AI monitoring
-            ml-platform/component: "pytorch-training"
-            ml-platform/model: "smollm3-3b-wilderness"
+            ml-platform/component: "pytorch-distributed-training"
+            ml-platform/model: "smollm3-3b-wilderness-distributed"
         spec:
           tolerations:
             - effect: NoSchedule
@@ -26,18 +26,43 @@ spec:
               operator: Exists
           containers:
             - name: pytorch
-              image: ghcr.io/thesteve0/smollm3-wilderness-finetune:0.1.20250927-181232
+              image: ghcr.io/thesteve0/smollm3-distributed-finetune:0.1.20250928-225553
               env:
                 - name: EPOCHS
                   value: "4"
                 - name: BATCH_SIZE
-                  value: "12"
+                  value: "28"  # Aggressive optimization: Maximum VRAM utilization for L40S (48GB)
                 - name: LEARNING_RATE
                   value: "5e-5"
                 - name: DATA_DIR
-                  value: "/shared/data"
+                  value: "/tmp/data"
                 - name: OUTPUT_DIR
-                  value: "/shared/models"
+                  value: "/persistent/models"
+                # Distributed training environment variables
+                - name: WORLD_SIZE
+                  value: "2"  # Total number of processes (1 master + 1 worker)
+                - name: MASTER_ADDR
+                  value: "0.0.0.0"
+                - name: MASTER_PORT
+                  value: "23456"
+                - name: RANK
+                  value: "0"  # Master rank
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: NCCL_SOCKET_IFNAME
+                  value: "eth0"
+                - name: NCCL_IB_DISABLE
+                  value: "1"
+                - name: NCCL_P2P_DISABLE
+                  value: "1"
+                - name: NCCL_ALGO
+                  value: "Ring"
+                - name: NCCL_PROTO
+                  value: "Simple"
+                - name: NCCL_CROSS_NIC
+                  value: "0"
+                - name: PYTORCH_CUDA_ALLOC_CONF
+                  value: "expandable_segments:True"
               resources:
                 requests:
                   memory: "16Gi"
@@ -46,17 +71,76 @@ spec:
                 limits:
                   memory: "20Gi"
                   cpu: "6"
-                  # NVIDIA L40S with 48GB VRAM targeting 45GB utilization (94%)
+                  # NVIDIA L40S with 48GB VRAM for distributed training
                   nvidia.com/gpu: 1
+              ports:
+                - containerPort: 23456
+                  name: master-port
               volumeMounts:
-                - name: trained-models
-                  mountPath: /shared/models
-                - name: workspace
-                  mountPath: /shared/workspace
+                - name: model-storage
+                  mountPath: /persistent
           volumes:
-            - name: trained-models
+            - name: model-storage
               persistentVolumeClaim:
-                claimName: trained-models-pvc
-            - name: workspace
-              persistentVolumeClaim:
-                claimName: workspace-pvc
+                claimName: master-model-storage-pvc
+    Worker:
+      replicas: 1  # 1 worker node for distributed training
+      restartPolicy: OnFailure
+      template:
+        metadata:
+          annotations:
+            ml-platform/component: "pytorch-distributed-worker"
+            ml-platform/model: "smollm3-3b-wilderness-distributed"
+        spec:
+          tolerations:
+            - effect: NoSchedule
+              key: nvidia.com/gpu
+              operator: Exists
+          containers:
+            - name: pytorch
+              image: ghcr.io/thesteve0/smollm3-distributed-finetune:0.1.20250928-225553
+              env:
+                - name: EPOCHS
+                  value: "4"
+                - name: BATCH_SIZE
+                  value: "28"  # Aggressive optimization: Maximum VRAM utilization for L40S (48GB)
+                - name: LEARNING_RATE
+                  value: "5e-5"
+                - name: DATA_DIR
+                  value: "/tmp/data"
+                - name: OUTPUT_DIR
+                  value: "/tmp/models"
+                # Distributed training environment variables
+                - name: WORLD_SIZE
+                  value: "2"  # Total number of processes (1 master + 1 worker)
+                - name: MASTER_ADDR
+                  value: "smollm3-distributed-finetuning-master-0"
+                - name: MASTER_PORT
+                  value: "23456"
+                # RANK will be set automatically by PyTorchJob for workers
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: NCCL_SOCKET_IFNAME
+                  value: "eth0"
+                - name: NCCL_IB_DISABLE
+                  value: "1"
+                - name: NCCL_P2P_DISABLE
+                  value: "1"
+                - name: NCCL_ALGO
+                  value: "Ring"
+                - name: NCCL_PROTO
+                  value: "Simple"
+                - name: NCCL_CROSS_NIC
+                  value: "0"
+                - name: PYTORCH_CUDA_ALLOC_CONF
+                  value: "expandable_segments:True"
+              resources:
+                requests:
+                  memory: "16Gi"
+                  cpu: "4"
+                  nvidia.com/gpu: 1
+                limits:
+                  memory: "20Gi"
+                  cpu: "6"
+                  # NVIDIA L40S with 48GB VRAM for distributed training
+                  nvidia.com/gpu: 1

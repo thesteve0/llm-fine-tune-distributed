@@ -30,24 +30,38 @@ spec:
                 - name: EPOCHS
                   value: "4"
                 - name: BATCH_SIZE
-                  value: "8"  # Reduced per-device batch size for distributed training
+                  value: "28"  # Aggressive optimization: Maximum VRAM utilization for L40S (48GB)
                 - name: LEARNING_RATE
                   value: "5e-5"
                 - name: DATA_DIR
-                  value: "/shared/data"
+                  value: "/tmp/data"
                 - name: OUTPUT_DIR
-                  value: "/shared/models"
+                  value: "/persistent/models"
                 # Distributed training environment variables
                 - name: WORLD_SIZE
-                  value: "4"  # Total number of processes (1 master + 3 workers)
+                  value: "2"  # Total number of processes (1 master + 1 worker)
                 - name: MASTER_ADDR
-                  value: "smollm3-distributed-finetuning-master-0"
+                  value: "0.0.0.0"
                 - name: MASTER_PORT
                   value: "23456"
                 - name: RANK
                   value: "0"  # Master rank
                 - name: NCCL_DEBUG
                   value: "INFO"
+                - name: NCCL_SOCKET_IFNAME
+                  value: "eth0"
+                - name: NCCL_IB_DISABLE
+                  value: "1"
+                - name: NCCL_P2P_DISABLE
+                  value: "1"
+                - name: NCCL_ALGO
+                  value: "Ring"
+                - name: NCCL_PROTO
+                  value: "Simple"
+                - name: NCCL_CROSS_NIC
+                  value: "0"
+                - name: PYTORCH_CUDA_ALLOC_CONF
+                  value: "expandable_segments:True"
               resources:
                 requests:
                   memory: "16Gi"
@@ -58,23 +72,18 @@ spec:
                   cpu: "6"
                   # NVIDIA L40S with 48GB VRAM for distributed training
                   nvidia.com/gpu: 1
-              volumeMounts:
-                - name: trained-models
-                  mountPath: /shared/models
-                - name: workspace
-                  mountPath: /shared/workspace
               ports:
                 - containerPort: 23456
                   name: master-port
+              volumeMounts:
+                - name: model-storage
+                  mountPath: /persistent
           volumes:
-            - name: trained-models
+            - name: model-storage
               persistentVolumeClaim:
-                claimName: trained-models-pvc
-            - name: workspace
-              persistentVolumeClaim:
-                claimName: workspace-pvc
+                claimName: master-model-storage-pvc
     Worker:
-      replicas: 3  # 3 worker nodes for distributed training
+      replicas: 1  # 1 worker node for distributed training
       restartPolicy: OnFailure
       template:
         metadata:
@@ -93,16 +102,16 @@ spec:
                 - name: EPOCHS
                   value: "4"
                 - name: BATCH_SIZE
-                  value: "8"  # Reduced per-device batch size for distributed training
+                  value: "28"  # Aggressive optimization: Maximum VRAM utilization for L40S (48GB)
                 - name: LEARNING_RATE
                   value: "5e-5"
                 - name: DATA_DIR
-                  value: "/shared/data"
+                  value: "/tmp/data"
                 - name: OUTPUT_DIR
-                  value: "/shared/models"
+                  value: "/tmp/models"
                 # Distributed training environment variables
                 - name: WORLD_SIZE
-                  value: "4"  # Total number of processes (1 master + 3 workers)
+                  value: "2"  # Total number of processes (1 master + 1 worker)
                 - name: MASTER_ADDR
                   value: "smollm3-distributed-finetuning-master-0"
                 - name: MASTER_PORT
@@ -110,6 +119,20 @@ spec:
                 # RANK will be set automatically by PyTorchJob for workers
                 - name: NCCL_DEBUG
                   value: "INFO"
+                - name: NCCL_SOCKET_IFNAME
+                  value: "eth0"
+                - name: NCCL_IB_DISABLE
+                  value: "1"
+                - name: NCCL_P2P_DISABLE
+                  value: "1"
+                - name: NCCL_ALGO
+                  value: "Ring"
+                - name: NCCL_PROTO
+                  value: "Simple"
+                - name: NCCL_CROSS_NIC
+                  value: "0"
+                - name: PYTORCH_CUDA_ALLOC_CONF
+                  value: "expandable_segments:True"
               resources:
                 requests:
                   memory: "16Gi"
@@ -120,15 +143,3 @@ spec:
                   cpu: "6"
                   # NVIDIA L40S with 48GB VRAM for distributed training
                   nvidia.com/gpu: 1
-              volumeMounts:
-                - name: trained-models
-                  mountPath: /shared/models
-                - name: workspace
-                  mountPath: /shared/workspace
-          volumes:
-            - name: trained-models
-              persistentVolumeClaim:
-                claimName: trained-models-pvc
-            - name: workspace
-              persistentVolumeClaim:
-                claimName: workspace-pvc
