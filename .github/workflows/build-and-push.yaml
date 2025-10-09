@@ -1,0 +1,49 @@
+# This workflow is triggered on pushes to the repository that include changes to the Dockerfile.
+# It builds the Docker image and pushes it to the GitHub Container Registry (GHCR).
+
+name: Publish Docker Image to GHCR
+
+on:
+  push:
+    paths:
+      - 'Dockerfile' # Trigger the workflow only when the Dockerfile changes
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    # Grant permissions for the GITHUB_TOKEN to upload packages to GHCR
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        # This action helps generate tags and labels for the Docker image.
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/thesteve0/smollm3-distributed-finetune
+          tags: |
+            # Create a tag in the format 0.1.YYYYMMDD-HHMMSS
+            # The date format uses Go's reference time format.
+            type=schedule,pattern=0.1.{{date '20060102-150405' tz='UTC'}}
+
+      - name: Build and push Docker image
+        # This action builds the image from the Dockerfile and pushes it to the registry.
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
