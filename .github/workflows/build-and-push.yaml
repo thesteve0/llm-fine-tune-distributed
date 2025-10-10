@@ -20,22 +20,16 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v4
 
+      - name: Generate timestamp tag
+        id: generate_tag
+        run: echo "tag=0.1.$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for Docker
-        # This action helps generate tags and labels for the Docker image.
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-            images: ghcr.io/thesteve0/smollm3-distributed-finetune
-            tags: |
-              # Use the tag generated in the 'Generate timestamp tag' step
-              type=raw,value=${{ steps.generate_tag.outputs.tag }}
 
       - name: Build and push Docker image
         # This action builds the image from the Dockerfile and pushes it to the registry.
@@ -44,5 +38,9 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/thesteve0/smollm3-distributed-finetune:${{ steps.generate_tag.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=$(date -u --iso-8601=seconds)
+
