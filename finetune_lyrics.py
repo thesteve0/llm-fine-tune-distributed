@@ -295,7 +295,8 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
             dataloader_pin_memory=True,
             dataloader_num_workers=0,
             remove_unused_columns=False,
-            report_to=[],
+            report_to="aim",  # Enable Aim logging
+            run_name="smollm3-wilderness-finetuning-distributed",  # Experiment name in Aim UI
             gradient_checkpointing=True,
             dataloader_drop_last=True,
             max_seq_length=1024,

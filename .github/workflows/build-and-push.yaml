@@ -32,11 +32,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/thesteve0/smollm3-distributed-finetune
-          tags: |
-            # Create a tag in the format 0.1.YYYYMMDD-HHMMSS
-            # The date format uses Go's reference time format.
-            type=schedule,pattern=0.1.{{date '20060102-150405' tz='UTC'}}
+            images: ghcr.io/thesteve0/smollm3-distributed-finetune
+            tags: |
+              # Use the tag generated in the 'Generate timestamp tag' step
+              type=raw,value=${{ steps.generate_tag.outputs.tag }}
 
       - name: Build and push Docker image
         # This action builds the image from the Dockerfile and pushes it to the registry.
