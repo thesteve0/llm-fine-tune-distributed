@@ -1,6 +1,8 @@
 # Use RHT official PyTorch image as a base
 FROM quay.io/modh/training:py311-cuda124-torch251
 
+# For dev
+
 WORKDIR /app
 
 COPY requirements.txt .
