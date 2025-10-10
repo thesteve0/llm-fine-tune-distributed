@@ -1,7 +1,7 @@
 # Use RHT official PyTorch image as a base
 FROM quay.io/modh/training:py311-cuda124-torch251
 
-RUN echo "----> This is my custom log message"
+RUN echo "----> This is my custom log message - definitely new"
 
 WORKDIR /app
 
