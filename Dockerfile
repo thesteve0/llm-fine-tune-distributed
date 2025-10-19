@@ -11,6 +11,6 @@ RUN pip install --no-cache-dir -r requirements.txt && pip install git+https://gi
 
 COPY data/qa_dataset.parquet data/
 
-COPY finetune_lyrics.py .
+COPY training.py .
 
-CMD ["python", "finetune_lyrics.py"]
+CMD ["python", "training.py"]
