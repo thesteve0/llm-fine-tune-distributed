@@ -152,9 +152,9 @@ spec:
                   cpu: "6"
                   # NVIDIA L40S with 48GB VRAM for distributed training
                   nvidia.com/gpu: 1
-                volumeMounts:
-                  - name: aim-runs
-                    mountPath: /aim
+              volumeMounts:
+                - name: aim-runs
+                  mountPath: /aim
           volumes:
             - name: aim-runs
               persistentVolumeClaim:

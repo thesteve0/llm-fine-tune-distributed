@@ -11,6 +11,7 @@ from transformers import (
     TrainerCallback,
 )
 from trl import SFTTrainer, SFTConfig
+from aim.hugging_face import AimCallback
 
 def setup_distributed():
     """Setup distributed training environment for Accelerate integration"""
@@ -61,7 +62,6 @@ def main():
     # Create output directories (only on master node)
     if rank == 0:
         os.makedirs(f"{output_dir}/best_model", exist_ok=True)
-        os.makedirs(f"{output_dir}/demo_outputs", exist_ok=True)
 
     print(f"Configuration:")
     print(f"- Model: {model_name}")
@@ -72,35 +72,11 @@ def main():
     print(f"- Data dir: {data_dir}")
     print(f"- Output dir: {output_dir}")
 
-    # Environment diagnostics for NCCL troubleshooting
-    print("\n=== Environment Diagnostics ===")
-    print(f"CUDA available: {torch.cuda.is_available()}")
+    # Check CUDA availability
+    print(f"\nCUDA available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"CUDA device count: {torch.cuda.device_count()}")
-        print(f"Current CUDA device: {torch.cuda.current_device()}")
         print(f"CUDA device name: {torch.cuda.get_device_name()}")
-        print(f"CUDA capability: {torch.cuda.get_device_capability()}")
-
-    # Check NCCL availability
-    try:
-        nccl_available = torch.distributed.is_nccl_available()
-        print(f"NCCL available: {nccl_available}")
-    except Exception as e:
-        print(f"NCCL check failed: {e}")
-
-    # Network interface information
-    import socket
-    hostname = socket.gethostname()
-    print(f"Hostname: {hostname}")
-    print(f"Container networking interface: eth0")
-
-    # Environment variables
-    print(f"NCCL_DEBUG: {os.getenv('NCCL_DEBUG', 'not set')}")
-    print(f"NCCL_SOCKET_IFNAME: {os.getenv('NCCL_SOCKET_IFNAME', 'not set')}")
-    print(f"NCCL_IB_DISABLE: {os.getenv('NCCL_IB_DISABLE', 'not set')}")
-    print(f"NCCL_P2P_DISABLE: {os.getenv('NCCL_P2P_DISABLE', 'not set')}")
-    print(f"PYTORCH_CUDA_ALLOC_CONF: {os.getenv('PYTORCH_CUDA_ALLOC_CONF', 'not set')}")
-    print("=== End Diagnostics ===\n")
 
     if not torch.cuda.is_available():
         print("ERROR: CUDA not available - distributed training requires GPUs")
@@ -133,7 +109,6 @@ def main():
             allocated = torch.cuda.memory_allocated() / 1024**3
             reserved = torch.cuda.memory_reserved() / 1024**3
             print(f"VRAM after model loading: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
-            print(f"L40S VRAM utilization: {reserved/48*100:.1f}% of 48GB")
 
         # Freeze all layers except the last ones for memory efficiency
         for param in model.parameters():
@@ -145,19 +120,15 @@ def main():
                 layers = model.model.layers
                 for param in layers[-2:].parameters():
                     param.requires_grad = True
-                print(f"Unfroze last 2 layers from model.layers (total layers: {len(layers)})")
             elif hasattr(model, 'transformer') and hasattr(model.transformer, 'h'):
                 layers = model.transformer.h
                 for param in layers[-2:].parameters():
                     param.requires_grad = True
-                print(f"Unfroze last 2 layers from transformer.h (total layers: {len(layers)})")
             elif hasattr(model, 'gpt_neox') and hasattr(model.gpt_neox, 'layers'):
                 layers = model.gpt_neox.layers
                 for param in layers[-2:].parameters():
                     param.requires_grad = True
-                print(f"Unfroze last 2 layers from gpt_neox.layers (total layers: {len(layers)})")
             else:
-                print("Could not find transformer layers, unfreezing all parameters")
                 for param in model.parameters():
                     param.requires_grad = True
 
@@ -165,17 +136,11 @@ def main():
             if hasattr(model, 'embed_out'):
                 for param in model.embed_out.parameters():
                     param.requires_grad = True
-                print("Unfroze embed_out layer")
             elif hasattr(model, 'lm_head'):
                 for param in model.lm_head.parameters():
                     param.requires_grad = True
-                print("Unfroze lm_head layer")
-            else:
-                print("Could not find output layer")
 
         except Exception as e:
-            print(f"Error unfreezing layers: {e}")
-            print("Falling back to unfreezing all parameters")
             for param in model.parameters():
                 param.requires_grad = True
 
@@ -255,14 +220,30 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
             if logs:
                 self.history.append(logs)
 
+    # Custom callback to track additional metrics like perplexity
+    class PerplexityCallback(TrainerCallback):
+        def on_log(self, args, state, control, model=None, logs=None, **kwargs):
+            """Calculate and log perplexity from loss values"""
+            if logs:
+                import math
+                # Add perplexity for training loss
+                if 'loss' in logs:
+                    logs['perplexity'] = math.exp(logs['loss'])
+                # Add perplexity for evaluation loss
+                if 'eval_loss' in logs:
+                    logs['eval_perplexity'] = math.exp(logs['eval_loss'])
+
     history_callback = TrainingHistoryCallback()
+    perplexity_callback = PerplexityCallback()
+
+    # Initialize Aim callback for experiment tracking
+    aim_repo = os.getenv("AIM_REPO", "/aim")
+    aim_callback = AimCallback(repo=aim_repo, experiment='smollm3-wilderness-finetuning-distributed')
 
     try:
         # Set Up SFTTrainer with TRL for chat model fine-tuning
         import transformers
         import trl
-        print(f"Transformers version: {transformers.__version__}")
-        print(f"TRL version: {trl.__version__}")
 
         # Configure distributed training arguments
         distributed_args = {}
@@ -278,15 +259,16 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
             output_dir=f"{output_dir}/checkpoints",
             per_device_train_batch_size=batch_size,
             per_device_eval_batch_size=batch_size,
-            gradient_accumulation_steps=4 if world_size == 1 else 16,  # Aggressive network optimization: Maximum sync reduction
+            gradient_accumulation_steps=4,  # Balance between sync frequency and training steps
             learning_rate=learning_rate * world_size if world_size > 1 else learning_rate,  # Scale learning rate
             max_grad_norm=1.0,
             num_train_epochs=epochs,
-            logging_steps=10,
+            logging_steps=2,  # Log metrics every 2 steps for more frequent updates
+            logging_first_step=True,  # Log immediately so Aim shows data right away
             save_steps=500,
             bf16=True,
             eval_strategy="steps",
-            eval_steps=100,
+            eval_steps=10,  # Evaluate every 10 steps (was 100, which never ran)
             save_strategy="steps",
             load_best_model_at_end=True,
             metric_for_best_model="eval_loss",
@@ -295,8 +277,6 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
             dataloader_pin_memory=True,
             dataloader_num_workers=0,
             remove_unused_columns=False,
-            report_to="aim",  # Enable Aim logging
-            run_name="smollm3-wilderness-finetuning-distributed",  # Experiment name in Aim UI
             gradient_checkpointing=True,
             dataloader_drop_last=True,
             max_seq_length=1024,
@@ -311,30 +291,14 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
             args=training_args,
             train_dataset=processed_train,
             eval_dataset=processed_val,
-            callbacks=[history_callback],
+            callbacks=[history_callback, perplexity_callback, aim_callback],
         )
 
         # Start Fine-Tuning
         print("Starting fine-tuning on Q&A dataset with SmolLM3-3B...")
-        print(f"Target VRAM usage: <45GB/48GB (L40S GPU capacity)")
-
-        # Pre-training VRAM check
-        if torch.cuda.is_available():
-            allocated = torch.cuda.memory_allocated() / 1024**3
-            reserved = torch.cuda.memory_reserved() / 1024**3
-            print(f"VRAM before training: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
-            if reserved > 40:
-                print("WARNING: High VRAM usage before training - risk of OOM!")
 
         training_result = trainer.train()
         print("Fine-tuning complete!")
-
-        # Post-training VRAM check
-        if torch.cuda.is_available():
-            allocated = torch.cuda.memory_allocated() / 1024**3
-            reserved = torch.cuda.memory_reserved() / 1024**3
-            print(f"VRAM after training: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
-            print(f"Peak L40S VRAM utilization: {reserved/48*100:.1f}% of 48GB")
 
     except Exception as e:
         print(f"Error during training: {e}")
@@ -374,74 +338,12 @@ Always provide detailed explanations, safety warnings when relevant, and multipl
         print(f"Error saving artifacts: {e}")
         raise
 
-    try:
-        # Generate demo outputs for Q&A demonstration (only on rank 0 in distributed training)
-        if rank == 0:
-            print("Generating demo outputs...")
-            demo_questions = [
-                "For Simple Car Maintenance Checks, How often should I check my oil level?",
-                "For Basic Home Repairs, How do I fix a leaky faucet?",
-                "For Computer Troubleshooting, What should I do if my computer won't start?"
-            ]
-
-            # Disable gradient checkpointing for inference
-            model.config.use_cache = True
-            if hasattr(model, 'gradient_checkpointing_enable'):
-                model.gradient_checkpointing_disable()
-
-            demo_outputs = []
-            for i, question in enumerate(demo_questions):
-                try:
-                    messages = [
-                        {"role": "system", "content": WILDERNESS_EXPERT_SYSTEM_PROMPT},
-                        {"role": "user", "content": question}
-                    ]
-
-                    prompt = tokenizer.apply_chat_template(
-                        messages,
-                        tokenize=False,
-                        add_generation_prompt=True
-                    )
-
-                    inputs = tokenizer(prompt, return_tensors="pt")
-                    if torch.cuda.is_available():
-                        inputs = inputs.to(device)
-
-                    with torch.no_grad():
-                        output = model.generate(
-                            **inputs,
-                            max_new_tokens=100,
-                            do_sample=True,
-                            top_k=40,
-                            top_p=0.9,
-                            temperature=0.3,
-                            repetition_penalty=1.1,
-                            pad_token_id=tokenizer.eos_token_id,
-                            use_cache=True
-                        )
-                    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
-                    demo_outputs.append({"prompt": prompt, "response": generated_text})
-                    print(f"\n--- Demo Output {i+1} ---")
-                    print(generated_text[:500] + "...")
-                except Exception as e:
-                    print(f"Error generating demo output {i+1}: {e}")
-                    demo_outputs.append({"prompt": prompt, "response": f"Error: {e}"})
-
-            # Save demo outputs
-            with open(f"{output_dir}/demo_outputs/sample_responses.json", "w") as f:
-                json.dump(demo_outputs, f, indent=2)
-
-    except Exception as e:
-        print(f"Error generating demo outputs: {e}")
-        # Don't raise here, demo outputs are optional
-
     # Cleanup distributed training
     cleanup_distributed()
 
     if rank == 0:
         print(f"\nDistributed Q&A fine-tuning completed successfully!")
         print(f"Training artifacts saved to {output_dir}/")
-        print(f"Demo outputs saved to {output_dir}/demo_outputs/")
         print(f"Distributed training used {world_size} GPUs")
 
 if __name__ == "__main__":
